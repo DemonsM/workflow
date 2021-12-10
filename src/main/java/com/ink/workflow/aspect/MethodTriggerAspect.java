@@ -1,7 +1,8 @@
 package com.ink.workflow.aspect;
 
 import com.google.gson.Gson;
-import com.ink.workflow.annotation.MyAnno;
+import com.ink.workflow.annotation.MethodTrigger;
+import com.ink.workflow.util.MethodMonitorUtil;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.After;
@@ -9,29 +10,36 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.Pointcut;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.servlet.http.HttpServletRequest;
 import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 
 @Aspect
 @Component
-public class MyAnnoAspect {
-    private final static Logger LOGGER = LoggerFactory.getLogger(MyAnnoAspect.class);
+public class MethodTriggerAspect {
+    private final static Logger LOGGER = LoggerFactory.getLogger(MethodTriggerAspect.class);
     /**
      * 换行符
      */
     private static final String LINE_SEPARATOR = System.lineSeparator();
 
-    @Pointcut("@annotation(com.ink.workflow.annotation.MyAnno)")
-    public void myAnno() {
+    @Autowired
+    private MethodMonitorUtil monitorUtil;
+
+    @Pointcut("@annotation(com.ink.workflow.annotation.MethodTrigger)")
+    public void methodTrigger() {
     }
 
-    @Before("myAnno()")
+    @Before("methodTrigger()")
     public void doBefore(JoinPoint joinPoint) throws Exception {
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         assert attributes != null;
@@ -57,7 +65,7 @@ public class MyAnnoAspect {
     /**
      * 在切点之后织入
      */
-    @After("myAnno()")
+    @After("methodTrigger()")
     public void doAfter() {
         LOGGER.info("=========================================== End ===========================================" + LINE_SEPARATOR);
 
@@ -66,15 +74,31 @@ public class MyAnnoAspect {
     /**
      * 环绕
      */
-    @Around("myAnno()")
+    @Around("methodTrigger()")
     public Object doAround(ProceedingJoinPoint proceedingJoinPoint) throws Throwable {
+        LOGGER.info("========================================== Around Start ==========================================");
         long startTime = System.currentTimeMillis();
         Object result = proceedingJoinPoint.proceed();
+
+        MethodSignature methodSignature = (MethodSignature) proceedingJoinPoint.getSignature();
+        String[] parameterNames = methodSignature.getParameterNames();
+        Map<String, Object> requestParaMap = new HashMap<>();
+        Object[] args = proceedingJoinPoint.getArgs();
+        for (int i = 0; i < parameterNames.length; i++) {
+            requestParaMap.put(parameterNames[i], args[i]);
+        }
+        String classMethod = proceedingJoinPoint.getSignature().getDeclaringTypeName() + "." + proceedingJoinPoint.getSignature().getName();
+
+        //执行方法监听
+        monitorUtil.methodMonitor(classMethod, requestParaMap, result);
+
+        // 打印请求入参
+        LOGGER.info("Request Args   : {}", new Gson().toJson(requestParaMap));
         // 打印出参
         LOGGER.info("Response Args  : {}", new Gson().toJson(result));
         // 执行耗时
         LOGGER.info("Time-Consuming : {} ms", System.currentTimeMillis() - startTime);
-        //LOGGER.info("=========================================== End ===========================================" + LINE_SEPARATOR);
+        LOGGER.info("=========================================== Around End ===========================================" + LINE_SEPARATOR);
         return result;
     }
 
@@ -92,7 +116,7 @@ public class MyAnnoAspect {
             if (method.getName().equals(methodName)) {
                 Class<?>[] clazzArr = method.getParameterTypes();
                 if (clazzArr.length == arguments.length) {
-                    description.append(method.getAnnotation(MyAnno.class).description());
+                    description.append(method.getAnnotation(MethodTrigger.class).description());
                     break;
                 }
             }
